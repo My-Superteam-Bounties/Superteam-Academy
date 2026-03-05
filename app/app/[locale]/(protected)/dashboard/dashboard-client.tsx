@@ -132,7 +132,8 @@ export function DashboardClient() {
                 },
                 activeCourses,
                 recommendations,
-                recentActivity: recentActivityItems.map(a => ({
+                recentActivity: recentActivityItems.map((a, i) => ({
+                    id: `activity-${Date.now()}-${i}`,
                     type: a.type,
                     title: a.title,
                     description: a.description,
@@ -368,7 +369,7 @@ export function DashboardClient() {
                                 <h2 className="font-display text-lg font-bold w-full mb-4">{t("learningStreak", { defaultValue: "Learning Streak" })}</h2>
                                 <Calendar
                                     mode="multiple"
-                                    selected={mockActiveDays}
+                                    selected={activeDays}
                                     modifiers={streakModifiers}
                                     className="rounded-md border-none pointer-events-none shadow-none"
                                 />
