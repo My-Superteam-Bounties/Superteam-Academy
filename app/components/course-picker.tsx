@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useEnrollment } from "@/lib/enrollment-context";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -107,6 +108,10 @@ export function CoursePicker({ courses, trigger }: CoursePickerProps) {
                                     enrolled={false}
                                     onEnroll={() => {
                                         enrollInCourse(course.id);
+                                        setOpen(false);
+                                        toast.success(`Enrolled in ${course.title}`, {
+                                            description: "You can now start learning. Good luck!",
+                                        });
                                     }}
                                 />
                             ))}
@@ -136,8 +141,8 @@ function CoursePickerCard({
     return (
         <div
             className={`flex items-center gap-3 rounded-xl border p-3 transition-all ${enrolled
-                    ? "border-solana-purple/20 bg-solana-purple/5"
-                    : "border-border/60 hover:border-border hover:bg-accent/50 cursor-pointer"
+                ? "border-solana-purple/20 bg-solana-purple/5"
+                : "border-border/60 hover:border-border hover:bg-accent/50 cursor-pointer"
                 }`}
             onClick={enrolled ? undefined : onEnroll}
         >

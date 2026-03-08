@@ -11,6 +11,7 @@ import { AuthProvider } from "@/components/providers/auth-provider";
 import { SessionProvider } from "next-auth/react";
 import { Analytics } from "@/components/analytics";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { Toaster } from "@/components/ui/sonner";
 import { routing } from "@/i18n/routing";
 import "../globals.css";
 
@@ -105,6 +106,7 @@ export default async function LocaleLayout({
                                                 <ErrorBoundary>
                                                     {children}
                                                 </ErrorBoundary>
+                                                <Toaster position="bottom-right" />
                                             </TooltipProvider>
                                         </EnrollmentProvider>
                                     </AuthProvider>
