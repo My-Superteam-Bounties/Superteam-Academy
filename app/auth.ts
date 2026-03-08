@@ -4,7 +4,7 @@ import GitHub from "next-auth/providers/github";
 import Credentials from "next-auth/providers/credentials";
 import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
-import { sign } from "crypto";
+import nacl from "tweetnacl";
 
 import type { NextAuthConfig } from "next-auth";
 
@@ -81,23 +81,31 @@ const config: NextAuthConfig = {
 
                     if (!walletAddress || !signature || !message) return null;
 
-                    // Verify the signature
+                    // Verify the signature using tweetnacl
                     const publicKey = new PublicKey(walletAddress);
                     const messageBytes = new TextEncoder().encode(message);
                     const signatureBytes = bs58.decode(signature);
 
-                    // Ed25519 signature verification
-                    const { verify } = await import("@noble/ed25519");
-                    const isValid = await verify(signatureBytes, messageBytes, publicKey.toBytes());
+                    const isValid = nacl.sign.detached.verify(
+                        messageBytes,
+                        signatureBytes,
+                        publicKey.toBytes()
+                    );
 
-                    if (!isValid) return null;
+                    if (!isValid) {
+                        console.error("Wallet signature verification failed for:", walletAddress);
+                        return null;
+                    }
 
                     // Check the message contains a recent timestamp (within 5 min)
                     const timestampMatch = message.match(/Timestamp: (\d+)/);
                     if (timestampMatch) {
                         const ts = parseInt(timestampMatch[1], 10);
                         const now = Date.now();
-                        if (Math.abs(now - ts) > 5 * 60 * 1000) return null; // Expired
+                        if (Math.abs(now - ts) > 5 * 60 * 1000) {
+                            console.error("Wallet sign-in timestamp expired for:", walletAddress);
+                            return null;
+                        }
                     }
 
                     return {
@@ -106,7 +114,8 @@ const config: NextAuthConfig = {
                         walletAddress,
                         isOnboarded: false,
                     };
-                } catch {
+                } catch (error) {
+                    console.error("Wallet authorize error:", error);
                     return null;
                 }
             },
