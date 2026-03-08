@@ -66,31 +66,51 @@ function GitHubIcon({ className }: { className?: string }) {
 export function AuthButton() {
     const { user, isAuthenticated, isLoading, isWalletLinked, handleSignOut, linkWallet } = useAuth();
     const wallet = useWallet();
-    const { publicKey, signMessage, connecting, select } = wallet;
+    const { publicKey, signMessage, connecting, connected, select, disconnect, connect } = wallet;
     const [showSignIn, setShowSignIn] = useState(false);
     const [isWalletSigningIn, setIsWalletSigningIn] = useState(false);
-    const [pendingWalletConnect, setPendingWalletConnect] = useState(false);
+    const [awaitingSignIn, setAwaitingSignIn] = useState(false);
+    const [walletError, setWalletError] = useState<string | null>(null);
 
     // Detect installed wallets
     const isPhantomInstalled = typeof window !== "undefined" && !!(window as any).phantom?.solana;
     const isSolflareInstalled = typeof window !== "undefined" && !!(window as any).solflare?.isSolflare;
 
-    // When a wallet connects after we selected it, trigger sign-in
+    const walletBusy = connecting || isWalletSigningIn;
+
+    // When wallet connects and we're awaiting sign-in, trigger it
     useEffect(() => {
-        if (pendingWalletConnect && publicKey && signMessage) {
-            setPendingWalletConnect(false);
+        if (awaitingSignIn && publicKey && signMessage && !isWalletSigningIn) {
+            setAwaitingSignIn(false);
             handleWalletSignIn();
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pendingWalletConnect, publicKey, signMessage]);
+    }, [awaitingSignIn, publicKey, signMessage]);
 
-    // Connect to a specific wallet by name (no generic modal)
-    const connectSpecificWallet = (walletName: string) => {
+    // Connect to a specific wallet by name
+    const connectSpecificWallet = async (walletName: string) => {
+        setWalletError(null);
+        setAwaitingSignIn(true);
         try {
+            if (connected) await disconnect();
             select(walletName as WalletName);
-            setPendingWalletConnect(true);
-        } catch (error) {
-            console.error("Failed to select wallet:", error);
+
+            // Wait for adapter to initialize, then connect
+            await new Promise(resolve => setTimeout(resolve, 200));
+            await connect();
+        } catch (err: any) {
+            // Only show error for explicit user rejections (clicking "Cancel" in wallet popup)
+            // Don't show errors for adapter initialization issues — they auto-resolve
+            const isUserRejection = err?.message?.includes("rejected") ||
+                err?.message?.includes("User rejected") ||
+                err?.name === "WalletWindowClosedError";
+
+            if (isUserRejection) {
+                setAwaitingSignIn(false);
+                setWalletError("Connection cancelled.");
+            }
+            // For all other errors (adapter not ready, etc.), stay silent and let
+            // the useEffect handle it when the wallet eventually connects
         }
     };
 
@@ -99,27 +119,39 @@ export function AuthButton() {
         if (!publicKey || !signMessage) return;
 
         setIsWalletSigningIn(true);
+        setWalletError(null);
         try {
             const message = `Superteam Academy — Sign In\nWallet: ${publicKey.toBase58()}\nTimestamp: ${Date.now()}`;
             const messageBytes = new TextEncoder().encode(message);
             const signatureBytes = await signMessage(messageBytes);
             const signature = bs58.encode(signatureBytes);
 
-            await signIn("solana-wallet", {
+            const result = await signIn("solana-wallet", {
                 walletAddress: publicKey.toBase58(),
                 signature,
                 message,
-                callbackUrl: "/dashboard",
+                redirect: false,
             });
+
+            if (result?.error) {
+                console.error("Wallet sign-in returned error:", result.error);
+                setWalletError("Signature verification failed. Please try again.");
+                return;
+            }
+
+            // Success — redirect manually
+            setShowSignIn(false);
+            window.location.href = "/dashboard";
         } catch (error) {
             console.error("Wallet sign-in error:", error);
+            setWalletError("Sign-in was cancelled or failed. Please try again.");
         } finally {
             setIsWalletSigningIn(false);
         }
     };
 
-    // Loading state
-    if (isLoading || connecting) {
+    // Loading state — only for auth loading, NOT wallet connecting
+    if (isLoading) {
         return (
             <Button
                 size="sm"
@@ -138,7 +170,7 @@ export function AuthButton() {
             <>
                 <Button
                     size="sm"
-                    onClick={() => setShowSignIn(true)}
+                    onClick={() => { setWalletError(null); setShowSignIn(true); }}
                     className="rounded-full bg-gradient-to-r from-solana-purple to-solana-green px-5 font-semibold text-white shadow-lg shadow-solana-purple/20 transition-all hover:shadow-xl hover:shadow-solana-purple/30 hover:brightness-110"
                 >
                     Sign In
@@ -186,34 +218,32 @@ export function AuthButton() {
                                 </div>
                             </div>
 
-                            {/* Wallet Options */}
-                            {publicKey ? (
+                            {/* Error message */}
+                            {walletError && (
+                                <div className="flex items-center gap-2 rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
+                                    <AlertCircle className="h-4 w-4 shrink-0" />
+                                    <span>{walletError}</span>
+                                </div>
+                            )}
+
+                            {/* Wallet Options — always show Phantom & Solflare */}
+                            <div className="space-y-2">
+                                {/* Phantom */}
                                 <Button
-                                    className="w-full gap-3 h-11 rounded-xl bg-gradient-to-r from-solana-purple to-solana-green text-white hover:brightness-110"
-                                    onClick={handleWalletSignIn}
-                                    disabled={isWalletSigningIn}
+                                    variant="outline"
+                                    className="w-full gap-3 h-11 rounded-xl border-[#AB9FF2]/30 hover:border-[#AB9FF2]/60 hover:bg-[#AB9FF2]/5"
+                                    disabled={walletBusy}
+                                    onClick={() => {
+                                        if (isPhantomInstalled) {
+                                            connectSpecificWallet("Phantom");
+                                        } else {
+                                            window.open("https://phantom.app/download", "_blank");
+                                        }
+                                    }}
                                 >
-                                    {isWalletSigningIn ? (
+                                    {walletBusy ? (
                                         <Loader2 className="h-4 w-4 animate-spin" />
                                     ) : (
-                                        <Wallet className="h-4 w-4" />
-                                    )}
-                                    Sign in as {truncateAddress(publicKey.toBase58())}
-                                </Button>
-                            ) : (
-                                <div className="space-y-2">
-                                    {/* Phantom */}
-                                    <Button
-                                        variant="outline"
-                                        className="w-full gap-3 h-11 rounded-xl border-[#AB9FF2]/30 hover:border-[#AB9FF2]/60 hover:bg-[#AB9FF2]/5"
-                                        onClick={() => {
-                                            if (isPhantomInstalled) {
-                                                connectSpecificWallet("Phantom");
-                                            } else {
-                                                window.open("https://phantom.app/download", "_blank");
-                                            }
-                                        }}
-                                    >
                                         <svg width="20" height="20" viewBox="0 0 128 128" fill="none">
                                             <rect width="128" height="128" rx="26" fill="#AB9FF2" />
                                             <path d="M110.584 64.9142H99.142C99.142 41.7651 80.173 23 56.7724 23C33.6612 23 14.8657 41.3057 14.4199 64.0583C13.9659 87.2098 33.8371 107 57.2495 107H62.3328C83.2189 107 110.584 88.7594 110.584 64.9142Z" fill="url(#phantom-grad)" />
@@ -226,40 +256,41 @@ export function AuthButton() {
                                                 </linearGradient>
                                             </defs>
                                         </svg>
-                                        {isPhantomInstalled ? "Connect Phantom" : "Install Phantom"}
-                                        {!isPhantomInstalled && (
-                                            <ExternalLink className="h-3 w-3 ml-auto text-muted-foreground" />
-                                        )}
-                                    </Button>
+                                    )}
+                                    {isPhantomInstalled ? "Connect Phantom" : "Install Phantom"}
+                                    {!isPhantomInstalled && (
+                                        <ExternalLink className="h-3 w-3 ml-auto text-muted-foreground" />
+                                    )}
+                                </Button>
 
-                                    {/* Solflare */}
-                                    <Button
-                                        variant="outline"
-                                        className="w-full gap-3 h-11 rounded-xl border-[#FC7227]/30 hover:border-[#FC7227]/60 hover:bg-[#FC7227]/5"
-                                        onClick={() => {
-                                            if (isSolflareInstalled) {
-                                                connectSpecificWallet("Solflare");
-                                            } else {
-                                                window.open("https://solflare.com/download", "_blank");
-                                            }
-                                        }}
-                                    >
-                                        <svg width="20" height="20" viewBox="0 0 101 96" fill="none">
-                                            <path d="M100.48 37.33L90.3 95.29H74.06L80.95 56.35L52.27 95.29H34.51L62.47 41.07L42.58 41.22L15.43 95.29H0L30.36 0.14L100.48 37.33Z" fill="url(#solflare-grad)" />
-                                            <defs>
-                                                <linearGradient id="solflare-grad" x1="0" y1="47.72" x2="100.48" y2="47.72" gradientUnits="userSpaceOnUse">
-                                                    <stop stopColor="#FFC10B" />
-                                                    <stop offset="1" stopColor="#FC7227" />
-                                                </linearGradient>
-                                            </defs>
-                                        </svg>
-                                        {isSolflareInstalled ? "Connect Solflare" : "Install Solflare"}
-                                        {!isSolflareInstalled && (
-                                            <ExternalLink className="h-3 w-3 ml-auto text-muted-foreground" />
-                                        )}
-                                    </Button>
-                                </div>
-                            )}
+                                {/* Solflare */}
+                                <Button
+                                    variant="outline"
+                                    className="w-full gap-3 h-11 rounded-xl border-[#FC7227]/30 hover:border-[#FC7227]/60 hover:bg-[#FC7227]/5"
+                                    disabled={walletBusy}
+                                    onClick={() => {
+                                        if (isSolflareInstalled) {
+                                            connectSpecificWallet("Solflare");
+                                        } else {
+                                            window.open("https://solflare.com/download", "_blank");
+                                        }
+                                    }}
+                                >
+                                    <svg width="20" height="20" viewBox="0 0 101 96" fill="none">
+                                        <path d="M100.48 37.33L90.3 95.29H74.06L80.95 56.35L52.27 95.29H34.51L62.47 41.07L42.58 41.22L15.43 95.29H0L30.36 0.14L100.48 37.33Z" fill="url(#solflare-grad)" />
+                                        <defs>
+                                            <linearGradient id="solflare-grad" x1="0" y1="47.72" x2="100.48" y2="47.72" gradientUnits="userSpaceOnUse">
+                                                <stop stopColor="#FFC10B" />
+                                                <stop offset="1" stopColor="#FC7227" />
+                                            </linearGradient>
+                                        </defs>
+                                    </svg>
+                                    {isSolflareInstalled ? "Connect Solflare" : "Install Solflare"}
+                                    {!isSolflareInstalled && (
+                                        <ExternalLink className="h-3 w-3 ml-auto text-muted-foreground" />
+                                    )}
+                                </Button>
+                            </div>
 
                             <p className="text-center text-xs text-muted-foreground pt-2">
                                 A wallet is required to earn on-chain XP and credentials.

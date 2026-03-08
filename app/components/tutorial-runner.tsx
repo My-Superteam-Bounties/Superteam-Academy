@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
-import type { CallBackProps, STATUS } from "react-joyride";
+import type { CallBackProps } from "react-joyride";
 import { tutorialSteps } from "@/lib/tutorials";
 import { useAuth } from "@/components/providers/auth-provider";
 
@@ -12,10 +12,26 @@ const Joyride = dynamic(() => import("react-joyride"), { ssr: false });
 const STORAGE_PREFIX = "superteam_tutorial_seen_";
 
 /**
+ * Resolve a CSS custom property to its computed color value.
+ * Creates a temporary element, applies the var(), and reads the computed color.
+ */
+function resolveColor(varName: string, fallback: string): string {
+    if (typeof window === "undefined") return fallback;
+    try {
+        const el = document.createElement("div");
+        el.style.color = `var(${varName}, ${fallback})`;
+        document.body.appendChild(el);
+        const resolved = getComputedStyle(el).color;
+        document.body.removeChild(el);
+        return resolved || fallback;
+    } catch {
+        return fallback;
+    }
+}
+
+/**
  * Renders a Joyride tutorial for a specific page.
  * Automatically shows on first visit, never again.
- * Props:
- *  - pageKey: key from tutorialSteps (e.g., "dashboard", "courseDetail")
  */
 export function TutorialRunner({ pageKey }: { pageKey: string }) {
     const { isAuthenticated, user } = useAuth();
@@ -29,14 +45,12 @@ export function TutorialRunner({ pageKey }: { pageKey: string }) {
     }, []);
 
     useEffect(() => {
-        // Don't show tutorial until user is fully onboarded
         if (!mounted || !isAuthenticated || !user?.isOnboarded || !steps?.length) return;
 
         const storageKey = `${STORAGE_PREFIX}${pageKey}`;
         const seen = typeof window !== "undefined" && localStorage.getItem(storageKey);
 
         if (!seen) {
-            // Delay to let page render and data-tutorial targets mount
             const timer = setTimeout(() => setRun(true), 1500);
             return () => clearTimeout(timer);
         }
@@ -57,6 +71,77 @@ export function TutorialRunner({ pageKey }: { pageKey: string }) {
         [pageKey]
     );
 
+    // Resolve theme colors from CSS variables at runtime
+    const joyrideStyles = useMemo(() => {
+        if (!mounted) return {};
+
+        const card = resolveColor("--card", "#1c1c1e");
+        const cardFg = resolveColor("--card-foreground", "#e4e4e7");
+        const mutedFg = resolveColor("--muted-foreground", "#71717a");
+        const primary = resolveColor("--solana-purple", "#9945FF");
+        const accent = resolveColor("--solana-green", "#14F195");
+
+        return {
+            options: {
+                primaryColor: primary,
+                zIndex: 10000,
+                arrowColor: card,
+                backgroundColor: card,
+                textColor: cardFg,
+                overlayColor: "rgba(0, 0, 0, 0.55)",
+            },
+            tooltip: {
+                borderRadius: "16px",
+                padding: "24px",
+                fontSize: "14px",
+                boxShadow: "0 25px 50px -12px rgba(0,0,0,0.4)",
+            },
+            tooltipContainer: {
+                textAlign: "left" as const,
+            },
+            tooltipTitle: {
+                fontSize: "16px",
+                fontWeight: 700,
+                color: cardFg,
+                borderBottom: `2px solid ${primary}`,
+                paddingBottom: "10px",
+                marginBottom: "8px",
+            },
+            tooltipContent: {
+                color: mutedFg,
+                lineHeight: 1.6,
+                padding: "8px 0 0 0",
+            },
+            buttonNext: {
+                borderRadius: "9999px",
+                padding: "8px 20px",
+                fontSize: "13px",
+                fontWeight: 600,
+                backgroundColor: primary,
+                color: "#ffffff",
+            },
+            buttonBack: {
+                borderRadius: "9999px",
+                padding: "8px 16px",
+                fontSize: "13px",
+                color: mutedFg,
+            },
+            buttonSkip: {
+                fontSize: "12px",
+                color: mutedFg,
+            },
+            buttonClose: {
+                color: mutedFg,
+            },
+            spotlight: {
+                borderRadius: "12px",
+            },
+            beacon: {
+                display: "none" as const,
+            },
+        };
+    }, [mounted]);
+
     if (!mounted || !steps?.length) return null;
 
     return (
@@ -67,43 +152,7 @@ export function TutorialRunner({ pageKey }: { pageKey: string }) {
             showSkipButton
             showProgress
             callback={handleCallback}
-            styles={{
-                options: {
-                    primaryColor: "hsl(var(--solana-purple, 264 100% 63%))",
-                    zIndex: 10000,
-                    arrowColor: "hsl(var(--card, 0 0% 100%))",
-                    backgroundColor: "hsl(var(--card, 0 0% 100%))",
-                    textColor: "hsl(var(--foreground, 0 0% 0%))",
-                    overlayColor: "rgba(0, 0, 0, 0.5)",
-                },
-                tooltip: {
-                    borderRadius: "16px",
-                    padding: "20px",
-                    fontSize: "14px",
-                },
-                tooltipContainer: {
-                    textAlign: "left",
-                },
-                buttonNext: {
-                    borderRadius: "9999px",
-                    padding: "8px 20px",
-                    fontSize: "13px",
-                    fontWeight: 600,
-                },
-                buttonBack: {
-                    borderRadius: "9999px",
-                    padding: "8px 16px",
-                    fontSize: "13px",
-                    color: "hsl(var(--muted-foreground, 0 0% 40%))",
-                },
-                buttonSkip: {
-                    fontSize: "12px",
-                    color: "hsl(var(--muted-foreground, 0 0% 40%))",
-                },
-                spotlight: {
-                    borderRadius: "12px",
-                },
-            }}
+            styles={joyrideStyles}
             locale={{
                 back: "Back",
                 close: "Got it",
